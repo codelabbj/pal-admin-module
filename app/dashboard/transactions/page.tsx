@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo, useEffect } from "react"
+import { useState, useMemo, useEffect, useRef, useCallback } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -57,13 +57,15 @@ import { ErrorDisplay, extractErrorMessages } from "@/components/ui/error-displa
 import { useWebSocket } from "@/components/providers/websocket-provider"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { useCallback } from "react"
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+
+const TRANSACTIONS_CACHE_KEY = "transactions_page_cache"
+const CACHE_TTL_MS = 5 * 60 * 1000 // 5 minutes
 
 const baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || "https://connect.api.blaffa.net"
 
@@ -84,6 +86,8 @@ export default function TransactionsPage() {
   const { toast } = useToast()
   const apiFetch = useApi()
   const router = useRouter()
+  const hasCacheRestored = useRef(false)
+  const isFirstMount = useRef(true)
   const [selectedTransaction, setSelectedTransaction] = useState<any | null>(null)
   const [detailModalOpen, setDetailModalOpen] = useState(false)
   const [detailLoading, setDetailLoading] = useState(false)
@@ -179,7 +183,7 @@ export default function TransactionsPage() {
   }
 
   // Fetch transactions from API
-  const fetchTransactions = async () => {
+  const fetchTransactions = async (forceFetch = false) => {
     setLoading(true)
     setError("")
     try {
@@ -220,6 +224,22 @@ export default function TransactionsPage() {
       setTransactions(data.results || [])
       setTotalCount(data.count || 0)
       setTotalPages(Math.ceil((data.count || 0) / itemsPerPage))
+
+      // Save to sessionStorage cache
+      try {
+        sessionStorage.setItem(TRANSACTIONS_CACHE_KEY, JSON.stringify({
+          timestamp: Date.now(),
+          results: data.results || [],
+          count: data.count || 0,
+          totalPages: Math.ceil((data.count || 0) / itemsPerPage),
+          searchTerm,
+          statusFilter,
+          typeFilter,
+          currentPage,
+          sortField,
+          sortDirection,
+        }))
+      } catch (_) { /* ignore storage errors */ }
       
       toast({
         title: "Transactions chargées",
@@ -253,7 +273,44 @@ export default function TransactionsPage() {
     }
   }
 
+  // On first mount: restore from cache if valid, otherwise fetch
   useEffect(() => {
+    try {
+      const cached = sessionStorage.getItem(TRANSACTIONS_CACHE_KEY)
+      if (cached) {
+        const parsed = JSON.parse(cached)
+        const isExpired = Date.now() - parsed.timestamp > CACHE_TTL_MS
+        if (!isExpired) {
+          // Restore filters to match cached state
+          setSearchTerm(parsed.searchTerm || "")
+          setStatusFilter(parsed.statusFilter || "all")
+          setTypeFilter(parsed.typeFilter || "all")
+          setCurrentPage(parsed.currentPage || 1)
+          setSortField(parsed.sortField || null)
+          setSortDirection(parsed.sortDirection || "desc")
+          // Restore data
+          setTransactions(parsed.results || [])
+          setTotalCount(parsed.count || 0)
+          setTotalPages(parsed.totalPages || 1)
+          hasCacheRestored.current = true
+          isFirstMount.current = false
+          return
+        }
+      }
+    } catch (_) { /* ignore storage errors */ }
+    // No valid cache — fetch fresh data
+    isFirstMount.current = false
+    fetchTransactions()
+  }, [])
+
+  // Re-fetch when filters / sort / page change (but not on initial mount)
+  useEffect(() => {
+    if (isFirstMount.current) return
+    if (hasCacheRestored.current) {
+      // First change after cache restore: clear cache flag so subsequent changes fetch
+      hasCacheRestored.current = false
+      return
+    }
     fetchTransactions()
   }, [searchTerm, statusFilter, typeFilter, currentPage, sortField, sortDirection])
 
@@ -414,6 +471,9 @@ export default function TransactionsPage() {
 
   // Refresh function for manual refresh button
   const handleRefresh = async () => {
+    // Clear cache so we force a real network fetch
+    try { sessionStorage.removeItem(TRANSACTIONS_CACHE_KEY) } catch (_) {}
+    hasCacheRestored.current = false
     await fetchTransactions()
     toast({
       title: "Actualisation",
@@ -1024,19 +1084,39 @@ export default function TransactionsPage() {
               Précédent
             </Button>
             <div className="flex items-center gap-1">
-              {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-                const page = i + 1;
-                return (
-                  <Button
-                    key={page}
-                    variant={currentPage === page ? "default" : "outline"}
-                    size="sm"
-                    onClick={() => setCurrentPage(page)}
-                  >
-                    {page}
-                  </Button>
-                );
-              })}
+              {(() => {
+                const visibleCount = 5
+                let startPage = Math.max(1, currentPage - Math.floor(visibleCount / 2))
+                let endPage = startPage + visibleCount - 1
+                if (endPage > totalPages) {
+                  endPage = totalPages
+                  startPage = Math.max(1, endPage - visibleCount + 1)
+                }
+                const pages: (number | "...")[] = []
+                if (startPage > 1) {
+                  pages.push(1)
+                  if (startPage > 2) pages.push("...")
+                }
+                for (let p = startPage; p <= endPage; p++) pages.push(p)
+                if (endPage < totalPages) {
+                  if (endPage < totalPages - 1) pages.push("...")
+                  pages.push(totalPages)
+                }
+                return pages.map((page, idx) =>
+                  page === "..." ? (
+                    <span key={`ellipsis-${idx}`} className="px-2 text-muted-foreground select-none">…</span>
+                  ) : (
+                    <Button
+                      key={page}
+                      variant={currentPage === page ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => setCurrentPage(page as number)}
+                    >
+                      {page}
+                    </Button>
+                  )
+                )
+              })()}
             </div>
             <Button
               variant="outline"

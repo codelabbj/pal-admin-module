@@ -21,7 +21,7 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
             "border-green-500 focus-visible:ring-green-500": success,
             "border-0 border-b-2 rounded-none bg-transparent focus-visible:ring-0": variant === "underline",
             "glass border-white/20": variant === "glass",
-            "border-0 bg-transparent focus-visible:ring-0": variant === "minimal",
+            "border border-input bg-transparent": variant === "minimal",
           },
           className
         )}

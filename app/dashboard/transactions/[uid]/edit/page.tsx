@@ -43,6 +43,7 @@ export default function EditTransactionPage() {
     external_transaction_id: "",
     raw_sms: "",
     processed_by_phone: "",
+    callback_url: "",
   })
 
   // Transaction logs state
@@ -63,6 +64,7 @@ export default function EditTransactionPage() {
           external_transaction_id: data.external_transaction_id || "",
           raw_sms: data.raw_sms || "",
           processed_by_phone: data.processed_by_phone || "",
+          callback_url: data.callback_url || "",
         })
       } catch (err: any) {
         setError(extractErrorMessages(err) || t("transactions.failedToLoad"))
@@ -117,6 +119,7 @@ export default function EditTransactionPage() {
         external_transaction_id: form.external_transaction_id,
         raw_sms: form.raw_sms,
         processed_by_phone: form.processed_by_phone,
+        callback_url: form.callback_url,
       }
       await apiFetch(`${baseUrl}/api/payments/transactions/${uid}/`, {
         method: "PATCH",
@@ -418,6 +421,17 @@ export default function EditTransactionPage() {
                   name="processed_by_phone" 
                   value={form.processed_by_phone} 
                   onChange={handleChange}
+                />
+              </div>
+              <div className="md:col-span-2">
+                <label className="block text-sm font-medium text-foreground mb-2">
+                  Callback URL
+                </label>
+                <Input 
+                  name="callback_url" 
+                  value={form.callback_url} 
+                  onChange={handleChange}
+                  placeholder="https://example.com/callback"
                 />
               </div>
             </div>
